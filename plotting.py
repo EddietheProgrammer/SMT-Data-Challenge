@@ -72,18 +72,10 @@ def plot_animation(player_position_df: pd.DataFrame,
 
         ball_size = (balls['ball_position_z'].values * 8)
         b.set_offsets(np.c_[balls['ball_position_x'], balls['ball_position_y']])
-<<<<<<< HEAD
         
         if ball_size < 1:
              ball_size = np.array([10])
-            
-=======
-
-        if ball_size < 1:
-             ball_size = np.array([10])
-          
->>>>>>> 1911cf03dd39e33f7edfc35a43c791c8f523d3eb
-        b.set_sizes(ball_size)
+                
 
         return p, b
 
