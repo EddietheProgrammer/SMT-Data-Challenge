@@ -66,9 +66,7 @@ ui <- fluidPage(
                  textOutput("route_efficiency"),
                  hr(),
                  selectInput("metric", "Select Metric:", 
-                             choices = c("exit_velocity", "launch_angle", "mean_speed", 
-                                         "actual_distance", 
-                                         "route_efficiency", "cubic_expected_distance", 
+                             choices = c( "route_efficiency", "q_route_efficiency", 
                                          "c_route_efficiency")),
                  selectInput("game_state", "Select Game State:", choices = unique(flyball_data$game_state))
                ),
@@ -244,6 +242,7 @@ server <- function(input, output, session) {
            x = "Player Position", y = paste("Average", input$metric)) +
       theme_minimal()
   })
+  
   
   
   # Create box plots of c_route_efficiency, q_route_efficiency, and route_efficiency filtered by game_state
