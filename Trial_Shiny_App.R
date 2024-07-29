@@ -1,52 +1,76 @@
-#setwd("C:/Users/braed.BRAEDYNSLAPTOP/Downloads/SMT_Data")
+# setwd("/Users/eddie/SMT-Data-Challenge2/Clean")
+
+#' TODO: 
+#' 1. Add in a descriptive disclaimer of what each route means such as c_route_efficiency and q_route_efficiency
+#' 2. Add in the xgboost model for the route drawing
+#' 4. Color scatterplot based on 5 star, 4 star, etc.
+#' 5. Player comparison tool
+
 
 library(shiny)
 library(plotly)
-library(ggplot2)
-library(dplyr)
+library(grid) 
+library(gridExtra)
+library(tidyverse)
 library(gganimate)
 library(data.table)
-library(baseballr)
 library(sportyR)
 library(tidyr)
 library(gt)
 
 
-# Load data set 
-flyball_data <- fread("flyball_data.csv")
+flyball_data <- read.csv("shinyapp.csv", colClasses=c("game_state"="character")) %>% 
+  mutate(game_state = case_when(
+    game_state == '000' ~ "No runners",
+    game_state == '100' ~ "Runner on 1st",
+    game_state == '010' ~ "Runner on 2nd",
+    game_state == '001' ~ "Runner on 3rd",
+    game_state == '110' ~ "Runners on 1st and 2nd",
+    game_state == '011' ~ "Runners on 2nd and 3rd",
+    game_state == '101' ~ "Runners on 1st and 3rd",
+    game_state == '111' ~ "Bases loaded"),
+    is_caught = case_when(
+      almost_caught == 0 & event_code != "Ball Deflection" ~ 1,
+      TRUE ~ 0
+    ))
 
 
+plotflyballlocation <- function(flyball_data) {
+  avg_x <- mean(flyball_data$field_x, na.rm = TRUE)
+  avg_y <- mean(flyball_data$field_y, na.rm = TRUE)
+  max_route <- max(flyball_data$route_efficiency)
 
-# Define plotflyballlocation function
-plotflyballlocation <- function(flyball_data, metric) {
-  ggplot(flyball_data, aes(x = ball_position_x, y = ball_position_y)) +
-    geom_point(aes(color = .data[[metric]]), size = 3) +
-    scale_color_gradient2(low = "blue", high = "red", midpoint = mean(flyball_data[[metric]], na.rm = TRUE)) +
-    xlim(-330, 330) +
-    ylim(0, 450) +
-    geom_segment(aes(x = 0, xend = -315, y = 0, yend = 315), size = 1.2) +
-    geom_segment(aes(x = 0, xend = 315, y = 0, yend = 315), size = 1.2) +
-    geom_curve(aes(x = -315, xend = 315, y = 315, yend = 315), curvature = -.35, size = 1.2) +
-    geom_curve(aes(x = -90, xend = 90, y = 88, yend = 88), curvature = -.45, size = 1.2) +
-    coord_fixed() +
-    theme_bw() +
-    theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16)) +
-    ggtitle("Scatter Plot of Caught Balls") +
-    theme(axis.title.x = element_blank(),
-          axis.title.y = element_blank(),
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank())
+  p <- geom_baseball(league = 'MiLB') +
+  geom_point(data = flyball_data, aes(x = field_end_x, y = field_end_y, color = route_efficiency, shape = as.factor(is_caught)), size = 5) +
+  geom_point(data = flyball_data, aes(x = avg_x, y = avg_y), shape = 1, color = "black", size = 10, stroke = 3) +
+  geom_text(data = flyball_data, aes(x = avg_x, y = avg_y, label = player_position, fontface = "bold", size = 20), color = "black", show.legend = FALSE) +
+  scale_color_gradient2(low = "blue", high = "red", midpoint = 0.5, limits = c(0, 1)) +
+  scale_shape_manual(values = c("0" = 13, "1" = 16), labels = c("0" = "No Catch", "1" = "Catch")) +
+  labs(color = "Route Efficiency", shape = "Catch Status", 
+       caption="Efficiency values are from 0-1. Values > 1 are grey.") +
+    theme(
+      legend.position = c(1.2, 0.8),
+      legend.justification = "right",
+      legend.title = element_text(size = 12, face = "bold"),
+      legend.text = element_text(size = 10),
+      legend.box.background = element_rect(),
+      plot.caption = element_text(hjust = 0.5, size = 14, face = "italic", color = "white")
+    )
+  
+  p_grob <- ggplotGrob(p)
+
+  title_grob <- textGrob(
+    label = "Flyball Location with Route Efficiency",
+    gp = gpar(fontsize = 24, fontface = "bold"),
+    just = "center"
+  )
+  
+  grid.arrange(
+    title_grob, p_grob,
+    heights = c(0.05, 0.4) 
+  )
 }
 
-
-# Define function to calculate route efficiency
-calculate_route_efficiency <- function(mean_speed, launch_angle, game_state, initial_angle, straight_line, actual_time) {
-  # Placeholder function for calculating route efficiency based on inputs
-  # Replace with actual logic
-  route_efficiency <- mean_speed * launch_angle * game_state * initial_angle * straight_line / actual_time
-  return(route_efficiency)
-}
 
 ui <- fluidPage(
   titlePanel("Outfielder Metrics Analysis"),
@@ -54,7 +78,10 @@ ui <- fluidPage(
     tabPanel("Metrics",
              sidebarLayout(
                sidebarPanel(
-                 selectInput("league", "Select League:", choices = unique(flyball_data$league)),
+                 selectInput("league", "Select League:", choices = c("Rookie" = "Home1A",
+                                                                     "Single A" = "Home2A",
+                                                                     "Double A" = "Home3A",
+                                                                     "Triple A" = "Home4A")),
                  selectInput("position", "Select Position:", choices = unique(flyball_data$player_position)),
                  checkboxInput("filter_by_player", "Filter by Player ID", value = FALSE),
                  conditionalPanel(
@@ -68,43 +95,29 @@ ui <- fluidPage(
                  textOutput("route_efficiency"),
                  hr(),
                  selectInput("metric", "Select Metric:", 
-                             choices = c( "route_efficiency", "q_route_efficiency", 
-                                         "c_route_efficiency"))
+                             choices = c("Standard Route Efficiency" = "route_efficiency", 
+                                        "Quadratic Route Efficiency" = "q_route_efficiency", 
+                                        "Cubic Route Efficiency"= "c_route_efficiency"))
                ),
                
                mainPanel(
+                 plotOutput("flyballLocationPlot",  height = "100%", width = "100%"),
+                 br(), br(),
                  plotlyOutput("scatterPlot"),
-                 plotOutput("flyballLocationPlot"),
-                 gt_output("flyballTable")
+                 br(), br(),
+                 gt_output("flyballTable"),
+                 br(), br()
                )
              )
     ),
-    tabPanel("Route",
+    tabPanel("Route Animation",
              sidebarLayout(
                sidebarPanel(
-                 sliderInput("field_y_slider", "Feild_y:", min = round(min(flyball_data$field_y),2), max = round(max(flyball_data$field_y),2), value = median(flyball_data$field_y)),
-                 sliderInput("exit_velocity_slider", "Exit Velocity:", min = round(min(flyball_data$exit_velocity),2), max = round(max(flyball_data$exit_velocity),2), value = median(flyball_data$exit_velocity)),
-                 sliderInput("launch_angle_slider", "Launch Angle:", min = round(min(flyball_data$launch_angle),2), max = round(max(flyball_data$launch_angle),2), value = round(median(flyball_data$launch_angle)),2),
-                 sliderInput("spray_angle_slider", "Spray Angle:", min = round(min(flyball_data$spray_angle),2), max = round(max(flyball_data$spray_angle),2), value = 0.5, step=1),
+                 sliderInput("mean_speed_slider", "Mean Speed:", min = round(min(flyball_data$mean_speed),2), max = round(max(flyball_data$mean_speed),2), value = median(flyball_data$mean_speed)),
                  sliderInput("route_eff_slider", "Route Efficiency:", min = round(min(flyball_data$route_efficiency),2), max = round(max(flyball_data$route_efficiency),2), value = 0.5, step = 0.01)
                ),
                mainPanel(
                  plotOutput("routePlot")
-               )
-             )
-    ),
-    tabPanel("Play Animation",
-             sidebarLayout(
-               sidebarPanel(
-                 sliderInput("mean_speed_slider2", "Mean Speed:", min = round(min(flyball_data$mean_speed),2), max = round(max(flyball_data$mean_speed),2), value = median(flyball_data$mean_speed)),
-                 sliderInput("launch_angle_slider", "Launch Angle:", min = round(min(flyball_data$launch_angle),2), max = round(max(flyball_data$launch_angle),2), value = round(median(flyball_data$launch_angle)),2),
-                 selectInput("game_state_dropdown", "Game State:", choices = c("Nobody on Base" = 1, "Runner on 1st" = 1.5,"Runner on 2nd" = 2,"Runner on 3rd" = 2.5,"Runner on 1st & 2nd" = 3,"Runner on 1st & 3rd" = 3.5,"Runner on 2nd & 3rd" = 4,"Bases Loaded" = 4.5)),
-                 sliderInput("initial_angle_slider", "Initial Angle:", min = round(min(flyball_data$initial_angle),2), max = round(max(flyball_data$initial_angle),2), value = round(median(flyball_data$initial_angle)),2),
-                 sliderInput("straight_line_slider", "Straight Line Distance:", min = round(min(flyball_data$straight_line),2), max = round(max(flyball_data$straight_line),2), value = median(flyball_data$straight_line)),
-                 sliderInput("actual_time_slider", "Hang Time:", min = round(min(flyball_data$actual_time),2), max = round(max(flyball_data$actual_time),2), value = median(flyball_data$actual_time))
-               ),
-               mainPanel(
-                 textOutput("calculated_route_efficiency")
                )
              )
     )
@@ -113,24 +126,24 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
-  # Filter data based on selected league and position
   filtered_data <- reactive({
-    req(input$league, input$position)  # Ensure inputs are not NULL
+    req(input$league, input$position)
     flyball_data %>%
       dplyr::filter(league == input$league & player_position == input$position)
   })
   
-  # Update player choices based on the filtered data
   observe({
-    req(filtered_data())  # Ensure filtered_data is reactive
-    updateSelectInput(session, "player_id", choices = unique(filtered_data()$player_id))
+    req(filtered_data())
+    player_ids <- unique(filtered_data()$player_id)
+    player_ids <- player_ids[!is.na(player_ids)]
+    updateSelectInput(session, "player_id", choices = player_ids)
   })
   
-  # Filter data based on selected player if checkbox is selected
+
   selected_data <- reactive({
-    req(filtered_data())  # Ensure filtered_data is reactive
+    req(filtered_data())
     if (input$filter_by_player) {
-      req(input$player_id)  # Ensure player_id is selected if checkbox is checked
+      req(input$player_id)
       filtered_data() %>%
         dplyr::filter(player_id == input$player_id)
     } else {
@@ -140,13 +153,13 @@ server <- function(input, output, session) {
   
   # Display metrics
   output$max_player_speed <- renderText({
-    req(selected_data())  # Ensure selected_data is reactive
-    paste("Max Speed:", round(max(selected_data()$max_player_speed, na.rm = TRUE), 2))
+    req(selected_data())
+    paste("Max Speed (ft/sec):", round(max(selected_data()$max_player_speed, na.rm = TRUE), 2))
   })
   
   output$mean_speed <- renderText({
     req(selected_data())
-    paste("Mean Speed:", round(mean(selected_data()$mean_speed, na.rm = TRUE), 2))
+    paste("Average Speed (ft/sec):", round(mean(selected_data()$mean_speed, na.rm = TRUE), 2))
   })
   
   output$route_efficiency <- renderText({
@@ -154,38 +167,42 @@ server <- function(input, output, session) {
     paste("Route Efficiency:", round(mean(selected_data()$route_efficiency, na.rm = TRUE), 2))
   })
   
-  # Create scatter plot of actual time vs. straight line
+  # Create scatter plot
   output$scatterPlot <- renderPlotly({
     data <- selected_data()
     
     plot_ly(
       data, 
-      x = ~straight_line,  
+      x = ~actual_distance,  
       y = ~actual_time,    
       type = 'scatter', 
       mode = 'markers',
       marker = list(size = 10),
       text = ~paste(
-        "Max Speed: ", round(max_speed, 2), "<br>",
+        "Speed (ft/sec): ", round(mean_speed, 2), "<br>",
         "Hang Time: ", round(actual_time, 2), "<br>",
-        "Distance Covered: ", round(straight_line, 2), "<br>",
-        "Route Efficiency: ", round(route_efficiency, 2), "<br>"
+        "Distance Covered: ", round(actual_distance, 2), "<br>",
+        "Standard Route Efficiency: ", round(route_efficiency, 2), "<br>"
       ),
       hoverinfo = 'text'
     ) %>%
       layout(
-        title = "Scatter Plot of Distance vs. Hang Time",
-        xaxis = list(title = "Straight Line Distance"),
-        yaxis = list(title = "Actual Time")
+        title = "Play Info Scatter Plot",
+        xaxis = list(title = "Distance (ft)", range = c(0, max(data$actual_distance) + 5)),
+        yaxis = list(title = "Actual Time (sec)", range = c(0, max(data$actual_time) + 1), tickvals = seq(1, max(data$actual_time) + 1))
       )
   })
   
   
-  # Create scatter plot of where each ball is caught
   output$flyballLocationPlot <- renderPlot({
     req(selected_data(), input$player_id, input$metric)
-    plotflyballlocation(selected_data(),input$metric)
-  })
+    
+    metric_df <- selected_data() %>%
+      mutate(route_efficiency = .data[[input$metric]])
+    
+    plotflyballlocation(metric_df)
+  }, height = 700, width = 1000)
+  
   
   # Create function to approximate the route based on slider values
   approximate_route <- reactive({
@@ -211,27 +228,18 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   
-  # Calculate and display route efficiency based on user inputs
-  output$calculated_route_efficiency <- renderText({
-    mean_speed <- input$mean_speed_slider2
-    launch_angle <- input$launch_angle_slider
-    game_state <- as.numeric(input$game_state_dropdown)
-    initial_angle <- input$initial_angle_slider
-    straight_line <- input$straight_line_slider
-    actual_time <- input$actual_time_slider
-    
-    route_efficiency <- calculate_route_efficiency(mean_speed, launch_angle, game_state, initial_angle, straight_line, actual_time)
-    
-    paste("Calculated Route Efficiency:", round(route_efficiency, 2))
-  })
-  
-  
-
-
   output$flyballTable <- render_gt({
     req(input$league, input$position)
     
-    # Filter data based on selected league and position
+    league_names <- c(
+      "Home1A" = "Rookie",
+      "Home2A" = "Single A",
+      "Home3A" = "Double A",
+      "Home4A" = "Triple A"
+    )
+    
+    selected_league_name <- league_names[input$league]
+    
     table_data <- flyball_data %>%
       filter(league == input$league, player_position == input$position) %>%
       group_by(game_state) %>%
@@ -249,16 +257,14 @@ server <- function(input, output, session) {
       ))) %>%
       arrange(game_state)
     
-    # Function to add sign formatting
     format_increase <- function(x) {
       formatted <- ifelse(x > 0, paste0("+", x), x)
       return(formatted)
     }
     
-    # Create the gt table
     gt_table <- gt(table_data) %>%
       tab_header(
-        title = paste("Efficient Routes by Game State:", input$league, " ", input$position)
+        title = paste("Efficient Routes by Game State:", selected_league_name, " || ", input$position)
       ) %>%
       cols_label(
         game_state = "Game State",
@@ -308,15 +314,8 @@ server <- function(input, output, session) {
           rows = increase_c_route_efficiency < 0
         )
       )
-    
-    gt_table
   })
-  
-
-  
   
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
-
