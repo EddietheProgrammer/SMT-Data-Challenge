@@ -1,53 +1,33 @@
-# setwd("/Users/eddie/SMT-Data-Challenge2/Clean")
-
-#' TODO: 
-#' 1. Add in a descriptive disclaimer of what each route means such as c_route_efficiency and q_route_efficiency
-#' 2. Add in the xgboost model for the route drawing
-#' 4. Color scatterplot based on 5 star, 4 star, etc.
-#' 5. Player comparison tool
-
+#setwd("C:/Users/braed.BRAEDYNSLAPTOP/Downloads/SMT_Data")
 
 library(shiny)
 library(plotly)
-library(grid) 
-library(gridExtra)
-library(tidyverse)
+library(ggplot2)
+library(dplyr)
 library(gganimate)
 library(data.table)
+library(baseballr)
 library(sportyR)
 library(tidyr)
 library(gt)
+library(shinycssloaders)
 
-
-flyball_data <- read.csv("shinyapp.csv", colClasses=c("game_state"="character")) %>% 
-  mutate(game_state = case_when(
-    game_state == '000' ~ "No runners",
-    game_state == '100' ~ "Runner on 1st",
-    game_state == '010' ~ "Runner on 2nd",
-    game_state == '001' ~ "Runner on 3rd",
-    game_state == '110' ~ "Runners on 1st and 2nd",
-    game_state == '011' ~ "Runners on 2nd and 3rd",
-    game_state == '101' ~ "Runners on 1st and 3rd",
-    game_state == '111' ~ "Bases loaded"),
-    is_caught = case_when(
-      almost_caught == 0 & event_code != "Ball Deflection" ~ 1,
-      TRUE ~ 0
-    ))
-
+# Load data set 
+flyball_data <- fread("flyball_data.csv")
 
 plotflyballlocation <- function(flyball_data) {
   avg_x <- mean(flyball_data$field_x, na.rm = TRUE)
   avg_y <- mean(flyball_data$field_y, na.rm = TRUE)
   max_route <- max(flyball_data$route_efficiency)
-
+  
   p <- geom_baseball(league = 'MiLB') +
-  geom_point(data = flyball_data, aes(x = field_end_x, y = field_end_y, color = route_efficiency, shape = as.factor(is_caught)), size = 5) +
-  geom_point(data = flyball_data, aes(x = avg_x, y = avg_y), shape = 1, color = "black", size = 10, stroke = 3) +
-  geom_text(data = flyball_data, aes(x = avg_x, y = avg_y, label = player_position, fontface = "bold", size = 20), color = "black", show.legend = FALSE) +
-  scale_color_gradient2(low = "blue", high = "red", midpoint = 0.5, limits = c(0, 1)) +
-  scale_shape_manual(values = c("0" = 13, "1" = 16), labels = c("0" = "No Catch", "1" = "Catch")) +
-  labs(color = "Route Efficiency", shape = "Catch Status", 
-       caption="Efficiency values are from 0-1. Values > 1 are grey.") +
+    geom_point(data = flyball_data, aes(x = field_end_x, y = field_end_y, color = route_efficiency, shape = as.factor(is_caught)), size = 5) +
+    geom_point(data = flyball_data, aes(x = avg_x, y = avg_y), shape = 1, color = "black", size = 10, stroke = 3) +
+    geom_text(data = flyball_data, aes(x = avg_x, y = avg_y, label = player_position, fontface = "bold", size = 20), color = "black", show.legend = FALSE) +
+    scale_color_gradient2(low = "blue", high = "red", midpoint = 0.5, limits = c(0, 1)) +
+    scale_shape_manual(values = c("0" = 13, "1" = 16), labels = c("0" = "No Catch", "1" = "Catch")) +
+    labs(color = "Route Efficiency", shape = "Catch Status", 
+         caption="Efficiency values are from 0-1. Values > 1 are grey.") +
     theme(
       legend.position = c(1.2, 0.8),
       legend.justification = "right",
@@ -58,7 +38,7 @@ plotflyballlocation <- function(flyball_data) {
     )
   
   p_grob <- ggplotGrob(p)
-
+  
   title_grob <- textGrob(
     label = "Flyball Location with Route Efficiency",
     gp = gpar(fontsize = 24, fontface = "bold"),
@@ -96,12 +76,14 @@ ui <- fluidPage(
                  hr(),
                  selectInput("metric", "Select Metric:", 
                              choices = c("Standard Route Efficiency" = "route_efficiency", 
-                                        "Quadratic Route Efficiency" = "q_route_efficiency", 
-                                        "Cubic Route Efficiency"= "c_route_efficiency"))
+                                         "Quadratic Route Efficiency" = "q_route_efficiency", 
+                                         "Cubic Route Efficiency"= "c_route_efficiency")),
+                 br(),
+                 p("Disclaimer: INPUT DISCLAIMERS")
                ),
                
                mainPanel(
-                 plotOutput("flyballLocationPlot",  height = "100%", width = "100%"),
+                 withSpinner(plotOutput("flyballLocationPlot",  height = "100%", width = "100%")),
                  br(), br(),
                  plotlyOutput("scatterPlot"),
                  br(), br(),
@@ -139,7 +121,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "player_id", choices = player_ids)
   })
   
-
+  
   selected_data <- reactive({
     req(filtered_data())
     if (input$filter_by_player) {
@@ -167,9 +149,25 @@ server <- function(input, output, session) {
     paste("Route Efficiency:", round(mean(selected_data()$route_efficiency, na.rm = TRUE), 2))
   })
   
-  # Create scatter plot
   output$scatterPlot <- renderPlotly({
+    req(input$metric)
+    
     data <- selected_data()
+    
+    # Determine the label for the selected metric
+    metric_label <- switch(input$metric,
+                           "route_efficiency" = "Standard Route Efficiency",
+                           "q_route_efficiency" = "Quadratic Route Efficiency",
+                           "c_route_efficiency" = "Cubic Route Efficiency")
+    
+    # Generate the text for hover information
+    hover_text <- ~paste(
+      "Speed (ft/sec): ", round(mean_speed, 2), "<br>",
+      "Hang Time: ", round(actual_time, 2), "<br>",
+      "Distance Covered: ", round(actual_distance, 2), "<br>",
+      paste0(metric_label, ": ", round(get(input$metric), 2)), "<br>",
+      "Catch Probability: ", round(catch_prob * 100, 2), "%"
+    )
     
     plot_ly(
       data, 
@@ -177,13 +175,13 @@ server <- function(input, output, session) {
       y = ~actual_time,    
       type = 'scatter', 
       mode = 'markers',
-      marker = list(size = 10),
-      text = ~paste(
-        "Speed (ft/sec): ", round(mean_speed, 2), "<br>",
-        "Hang Time: ", round(actual_time, 2), "<br>",
-        "Distance Covered: ", round(actual_distance, 2), "<br>",
-        "Standard Route Efficiency: ", round(route_efficiency, 2), "<br>"
+      marker = list(
+        size = 10,
+        color = ~catch_prob, # Adding color gradient based on catch_prob
+        colorscale = "Viridis", # Color gradient
+        colorbar = list(title = "Catch Probability")
       ),
+      text = hover_text,
       hoverinfo = 'text'
     ) %>%
       layout(
@@ -192,6 +190,9 @@ server <- function(input, output, session) {
         yaxis = list(title = "Actual Time (sec)", range = c(0, max(data$actual_time) + 1), tickvals = seq(1, max(data$actual_time) + 1))
       )
   })
+  
+  
+  
   
   
   output$flyballLocationPlot <- renderPlot({
@@ -250,17 +251,17 @@ server <- function(input, output, session) {
         avg_c_route_efficiency = round(mean(c_route_efficiency, na.rm = TRUE), 3),
         increase_c_route_efficiency = round(mean(c_route_efficiency, na.rm = TRUE) - mean(route_efficiency, na.rm = TRUE), 3)
       ) %>%
-      mutate(game_state = factor(game_state, levels = c(
-        "No runners", "Runner on 1st", "Runner on 2nd", "Runner on 3rd",
-        "Runners on 1st and 2nd", "Runners on 1st and 3rd", "Runners on 2nd and 3rd",
-        "Bases loaded"
-      ))) %>%
+      mutate(
+        game_state = factor(game_state, levels = c(
+          "No runners", "Runner on 1st", "Runner on 2nd", "Runner on 3rd",
+          "Runners on 1st and 2nd", "Runners on 1st and 3rd", "Runners on 2nd and 3rd",
+          "Bases loaded"
+        )),
+        avg_q_route_efficiency = glue::glue("{avg_q_route_efficiency} ({ifelse(increase_q_route_efficiency > 0, '<span style=\"color:green\">', '<span style=\"color:red\">')}{ifelse(increase_q_route_efficiency > 0, '+', '')}{increase_q_route_efficiency}</span>)"),
+        avg_c_route_efficiency = glue::glue("{avg_c_route_efficiency} ({ifelse(increase_c_route_efficiency > 0, '<span style=\"color:green\">', '<span style=\"color:red\">')}{ifelse(increase_c_route_efficiency > 0, '+', '')}{increase_c_route_efficiency}</span>)")
+      ) %>%
+      select(-increase_q_route_efficiency, -increase_c_route_efficiency) %>%
       arrange(game_state)
-    
-    format_increase <- function(x) {
-      formatted <- ifelse(x > 0, paste0("+", x), x)
-      return(formatted)
-    }
     
     gt_table <- gt(table_data) %>%
       tab_header(
@@ -270,51 +271,16 @@ server <- function(input, output, session) {
         game_state = "Game State",
         avg_route_efficiency = "Straight Line Route Efficiency",
         avg_q_route_efficiency = "Quadratic Route Efficiency",
-        increase_q_route_efficiency = "Change in Quadratic Efficiency",
-        avg_c_route_efficiency = "Cubic Route Efficiency",
-        increase_c_route_efficiency = "Change in Cubic Efficiency"
+        avg_c_route_efficiency = "Cubic Route Efficiency"
       ) %>%
-      text_transform(
-        locations = cells_body(columns = c(increase_q_route_efficiency, increase_c_route_efficiency)),
-        fn = function(x) format_increase(x)
-      ) %>%
-      tab_style(
-        style = list(
-          cell_text(color = "green", weight = "bold")
-        ),
-        locations = cells_body(
-          columns = increase_q_route_efficiency,
-          rows = increase_q_route_efficiency > 0
-        )
-      ) %>%
-      tab_style(
-        style = list(
-          cell_text(color = "red", weight = "bold")
-        ),
-        locations = cells_body(
-          columns = increase_q_route_efficiency,
-          rows = increase_q_route_efficiency < 0
-        )
-      ) %>%
-      tab_style(
-        style = list(
-          cell_text(color = "green", weight = "bold")
-        ),
-        locations = cells_body(
-          columns = increase_c_route_efficiency,
-          rows = increase_c_route_efficiency > 0
-        )
-      ) %>%
-      tab_style(
-        style = list(
-          cell_text(color = "red", weight = "bold")
-        ),
-        locations = cells_body(
-          columns = increase_c_route_efficiency,
-          rows = increase_c_route_efficiency < 0
-        )
+      fmt_markdown(
+        columns = c(avg_q_route_efficiency, avg_c_route_efficiency)
       )
+    
   })
+  
+  
+  
   
 }
 
