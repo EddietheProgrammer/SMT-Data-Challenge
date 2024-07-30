@@ -1,33 +1,52 @@
-#setwd("C:/Users/braed.BRAEDYNSLAPTOP/Downloads/SMT_Data")
+setwd("/Users/eddie/SMT-Data-Challenge2/Clean")
+
+#' TODO: 
+#' 1. Add in a descriptive disclaimer of what each route means such as c_route_efficiency and q_route_efficiency
+#' 5. Player comparison tool
+
 
 library(shiny)
 library(plotly)
-library(ggplot2)
-library(dplyr)
+library(grid) 
+library(gridExtra)
+library(tidyverse)
 library(gganimate)
-library(data.table)
-library(baseballr)
 library(sportyR)
 library(tidyr)
 library(gt)
 library(shinycssloaders)
+library(reticulate)
 
-# Load data set 
-flyball_data <- fread("flyball_data.csv")
+
+flyball_data <- read.csv("shinyapp.csv", colClasses=c("game_state"="character")) %>% 
+  mutate(game_state = case_when(
+    game_state == '000' ~ "No runners",
+    game_state == '100' ~ "Runner on 1st",
+    game_state == '010' ~ "Runner on 2nd",
+    game_state == '001' ~ "Runner on 3rd",
+    game_state == '110' ~ "Runners on 1st and 2nd",
+    game_state == '011' ~ "Runners on 2nd and 3rd",
+    game_state == '101' ~ "Runners on 1st and 3rd",
+    game_state == '111' ~ "Bases loaded"),
+    is_caught = case_when(
+      almost_caught == 0 & event_code != "Ball Deflection" ~ 1,
+      TRUE ~ 0
+    ))
+
 
 plotflyballlocation <- function(flyball_data) {
   avg_x <- mean(flyball_data$field_x, na.rm = TRUE)
   avg_y <- mean(flyball_data$field_y, na.rm = TRUE)
   max_route <- max(flyball_data$route_efficiency)
-  
+
   p <- geom_baseball(league = 'MiLB') +
-    geom_point(data = flyball_data, aes(x = field_end_x, y = field_end_y, color = route_efficiency, shape = as.factor(is_caught)), size = 5) +
-    geom_point(data = flyball_data, aes(x = avg_x, y = avg_y), shape = 1, color = "black", size = 10, stroke = 3) +
-    geom_text(data = flyball_data, aes(x = avg_x, y = avg_y, label = player_position, fontface = "bold", size = 20), color = "black", show.legend = FALSE) +
-    scale_color_gradient2(low = "blue", high = "red", midpoint = 0.5, limits = c(0, 1)) +
-    scale_shape_manual(values = c("0" = 13, "1" = 16), labels = c("0" = "No Catch", "1" = "Catch")) +
-    labs(color = "Route Efficiency", shape = "Catch Status", 
-         caption="Efficiency values are from 0-1. Values > 1 are grey.") +
+  geom_point(data = flyball_data, aes(x = field_end_x, y = field_end_y, color = route_efficiency, shape = as.factor(is_caught)), size = 5) +
+  geom_point(data = flyball_data, aes(x = avg_x, y = avg_y), shape = 1, color = "black", size = 10, stroke = 3) +
+  geom_text(data = flyball_data, aes(x = avg_x, y = avg_y, label = player_position, fontface = "bold", size = 20), color = "black", show.legend = FALSE) +
+  scale_color_gradient2(low = "blue", high = "red", midpoint = 0.5, limits = c(0, 1)) +
+  scale_shape_manual(values = c("0" = 13, "1" = 16), labels = c("0" = "No Catch", "1" = "Catch")) +
+  labs(color = "Route Efficiency", shape = "Catch Status", 
+       caption="Efficiency values are from 0-1. Values > 1 are grey.") +
     theme(
       legend.position = c(1.2, 0.8),
       legend.justification = "right",
@@ -38,7 +57,7 @@ plotflyballlocation <- function(flyball_data) {
     )
   
   p_grob <- ggplotGrob(p)
-  
+
   title_grob <- textGrob(
     label = "Flyball Location with Route Efficiency",
     gp = gpar(fontsize = 24, fontface = "bold"),
@@ -51,6 +70,34 @@ plotflyballlocation <- function(flyball_data) {
   )
 }
 
+cubic_bezier <- function(p0, p1, p2, p3) {
+  t_range <- seq(0, 1, length.out = 100)
+  bezier_points <- map(t_range, function(t) {
+    x <- (1 - t)^3 * p0[1] + 3 * (1 - t)^2 * t * p1[1] + 3 * (1 - t) * t^2 * p2[1] + t^3 * p3[1]
+    y <- (1 - t)^3 * p0[2] + 3 * (1 - t)^2 * t * p1[2] + 3 * (1 - t) * t^2 * p2[2] + t^3 * p3[2]
+    c(x, y)
+  })
+  
+  bezier_x <- map_dbl(bezier_points, 1)
+  bezier_y <- map_dbl(bezier_points, 2)
+  
+  list(bezier_x = bezier_x, bezier_y = bezier_y)
+}
+
+quadratic_bezier <- function(p0, p1, p2) {
+  t_range <- seq(0, 1, length.out = 100)
+  bezier_points <- map(t_range, function(t) {
+    x <- (1 - t)^2 * p0[1] + 2 * (1 - t) * t * p1[1] + t^2 * p2[1]
+    y <- (1 - t)^2 * p0[2] + 2 * (1 - t) * t * p1[2] + t^2 * p2[2]
+    c(x, y)
+  })
+  
+  bezier_x <- map_dbl(bezier_points, 1)
+  bezier_y <- map_dbl(bezier_points, 2)
+  
+  list(bezier_x = bezier_x, bezier_y = bezier_y)
+}
+
 
 ui <- fluidPage(
   titlePanel("Outfielder Metrics Analysis"),
@@ -58,10 +105,10 @@ ui <- fluidPage(
     tabPanel("Metrics",
              sidebarLayout(
                sidebarPanel(
-                 selectInput("league", "Select League:", choices = c("Rookie" = "Home1A",
-                                                                     "Single A" = "Home2A",
-                                                                     "Double A" = "Home3A",
-                                                                     "Triple A" = "Home4A")),
+                 selectInput("league", "Select League:", choices = c("1A" = "Home1A",
+                                                                     "2A" = "Home2A",
+                                                                     "3A" = "Home3A",
+                                                                     "4A" = "Home4A")),
                  selectInput("position", "Select Position:", choices = unique(flyball_data$player_position)),
                  checkboxInput("filter_by_player", "Filter by Player ID", value = FALSE),
                  conditionalPanel(
@@ -78,14 +125,14 @@ ui <- fluidPage(
                  hr(),
                  selectInput("metric", "Select Metric:", 
                              choices = c("Standard Route Efficiency" = "route_efficiency", 
-                                         "Quadratic Route Efficiency" = "q_route_efficiency", 
-                                         "Cubic Route Efficiency"= "c_route_efficiency")),
+                                        "Quadratic Route Efficiency" = "q_route_efficiency", 
+                                        "Cubic Route Efficiency"= "c_route_efficiency")),
                  br(),
                  p("Disclaimer: INPUT DISCLAIMERS")
                ),
                
                mainPanel(
-                 withSpinner(plotOutput("flyballLocationPlot",  height = "100%", width = "100%")),
+                 plotOutput("flyballLocationPlot",  height = "100%", width = "100%"),
                  br(), br(),
                  plotlyOutput("scatterPlot"),
                  br(), br(),
@@ -95,17 +142,38 @@ ui <- fluidPage(
              )
     ),
     tabPanel("Route Animation",
+             h4("Features:"),
              sidebarLayout(
                sidebarPanel(
-                 sliderInput("mean_speed_slider", "Mean Speed:", min = round(min(flyball_data$mean_speed),2), max = round(max(flyball_data$mean_speed),2), value = median(flyball_data$mean_speed)),
-                 sliderInput("route_eff_slider", "Route Efficiency:", min = round(min(flyball_data$route_efficiency),2), max = round(max(flyball_data$route_efficiency),2), value = 0.5, step = 0.01)
+                 fluidRow(
+                   column(6, textInput("field_x", "Starting Field X:", 0)),
+                   column(6, textInput("field_y", "Starting Field Y:", 250))
+                 ),
+                 sliderInput("spray_angle", "Spray Angle:", 
+                             min = round(-60, 2), 
+                             max = round(60, 2), 
+                             value = round(0, 2), step = 0.01),
+                 sliderInput("launch_angle", "Launch Angle:", 
+                             min = 10, 
+                             max = 80, 
+                             value = 30),
+                 sliderInput("exit_velocity", "Exit Velocity:", 
+                             min = 20, 
+                             max = 130, 
+                             value = 80),
+                 fluidRow(
+                   column(6, textInput("field_end_x", "Ending Field X:", 0)),
+                   column(6, textInput("field_end_y", "Ending Field Y:", 230))
+                 ),
+                 hr(),
+                 actionButton("route", "Animate Route")
                ),
                mainPanel(
                  plotOutput("routePlot")
                )
              )
+        )
     )
-  )
 )
 
 server <- function(input, output, session) {
@@ -123,7 +191,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "player_id", choices = player_ids)
   })
   
-  
+
   selected_data <- reactive({
     req(filtered_data())
     if (input$filter_by_player) {
@@ -135,7 +203,6 @@ server <- function(input, output, session) {
     }
   })
   
-  # Display metrics
   output$max_player_speed <- renderText({
     req(selected_data())
     paste("Max Speed (ft/sec):", round(max(selected_data()$max_player_speed, na.rm = TRUE), 2))
@@ -188,8 +255,8 @@ server <- function(input, output, session) {
       mode = 'markers',
       marker = list(
         size = 10,
-        color = ~catch_prob, # Adding color gradient based on catch_prob
-        colorscale = "RdBu", # Color gradient
+        color = ~catch_prob, 
+        colorscale = "RdBu", 
         colorbar = list(title = "Catch Probability")
       ),
       text = hover_text,
@@ -201,9 +268,6 @@ server <- function(input, output, session) {
         yaxis = list(title = "Actual Time (sec)", range = c(0, max(data$actual_time) + 1), tickvals = seq(1, max(data$actual_time) + 1))
       )
   })
-  
-  
-  
   
   
   output$flyballLocationPlot <- renderPlot({
@@ -244,10 +308,10 @@ server <- function(input, output, session) {
     req(input$league, input$position)
     
     league_names <- c(
-      "Home1A" = "Rookie",
-      "Home2A" = "Single A",
-      "Home3A" = "Double A",
-      "Home4A" = "Triple A"
+      "Home1A" = "1A",
+      "Home2A" = "2A",
+      "Home3A" = "3A",
+      "Home4A" = "4A"
     )
     
     selected_league_name <- league_names[input$league]
@@ -292,6 +356,97 @@ server <- function(input, output, session) {
   
   
   
+  
+  ######   ######   ######  2nd Page  ######   ######   ######   ######   ######   ######   ###### 
+  
+  pd <- import("pandas")
+  np <- import("numpy")
+  
+  predict_points <- reactive({
+    # First control point
+    p1_y <- pd$read_pickle("/Users/eddie/SMT-Data-Challenge2/Clean/p1_y.pkl")
+    # Second control point
+    p2_y <- pd$read_pickle("/Users/eddie/SMT-Data-Challenge2/Clean/p2_y.pkl")
+    
+    field_x <- as.numeric(input$field_x)
+    field_y <- as.numeric(input$field_y)
+    field_end_x <- as.numeric(input$field_end_x)
+    field_end_y <- as.numeric(input$field_end_y)
+    
+    # Control point x values will be 20% and 80% of the overall route:
+    # TODO: Make note of that in the UI
+    field_int_x1 <- field_end_x * 0.25
+    field_int_x2 <- field_end_x * 0.75
+    
+    
+    launch_angle <- input$launch_angle
+    exit_velocity <- input$exit_velocity
+    spray_angle <- input$spray_angle
+    
+    # Time to predict control points then draw a line
+    array <- np$array(list(list(launch_angle, exit_velocity, spray_angle, field_y)))
+    p1_pred <- p1_y$predict(array)$tolist()[1] # This is stupid.
+    
+    array <- np$array(list(list(launch_angle, exit_velocity, spray_angle, p1_pred)))
+    p2_pred <- p2_y$predict(array)$tolist()[1]
+    
+    list(
+      field_x = field_x,
+      field_y = field_y,
+      field_end_x = field_end_x,
+      field_end_y = field_end_y,
+      field_int_x1 = field_int_x1,
+      field_int_x2 = field_int_x2,
+      p1_pred = p1_pred,
+      p2_pred = p2_pred
+    )
+    
+  })
+  
+  # Animation plot
+  output$routePlot <- renderPlot({
+    
+    points <- predict_points()
+    # Start by plotting where the route will start with dashed lines to where it will go
+    if (!is.na(points$field_x) & !is.na(points$field_y) & !is.na(points$field_end_x) & !is.na(points$field_end_y)) {
+      geom_baseball(league = 'MiLB') + 
+        geom_point(aes(x = points$field_x, y = points$field_y), color = "yellow", size = 3, show.legend = FALSE) + 
+        geom_point(aes(x = points$field_int_x1, y = points$p1_pred), color = "green", size = 3) + 
+        geom_point(aes(x = points$field_int_x2, y = points$p2_pred), color = "blue", size = 3) + 
+        geom_segment(aes(x = points$field_x, y = points$field_y, xend = points$field_end_x, yend = points$field_end_y),
+                     color = "black", linetype = "dashed", size = 0.7) 
+    } else {
+      geom_baseball(league = 'MiLB')
+    }
+    
+  })
+  
+  observeEvent(input$route, {
+    points <- predict_points()
+    # Generate the quadratic Bézier curve
+    quadratic_values <- quadratic_bezier(c(points$field_x, points$field_y), 
+                                         c(points$field_int_x1, points$p1_pred), 
+                                         c(points$field_end_x, points$field_end_y))
+    df <- data.frame(
+      x = quadratic_values$bezier_x,
+      y = quadratic_values$bezier_y,
+      time = seq_along(quadratic_values$bezier_x)
+    )
+    
+    # Define the animation plot
+    p <- geom_baseball(league = 'MiLB') + 
+      geom_point(data = df, aes(x = x, y = y), color = "yellow", size = 3, show.legend = FALSE) + 
+      transition_time(time) + 
+      labs(title = 'Quadratic Bézier Curve Animation')
+    
+    output$routePlot <- renderPlot({
+    anim <- animate(p, nframes = 100, fps = 20, renderer = gifski_renderer("play.gif"))
+    # Render the GIF in the main panel
+    output$routePlot <- renderImage({
+      list(src = "play.gif", contentType = 'image/gif', alt = "Animation")
+    }, deleteFile = TRUE)
+    })
+  })
   
 }
 
