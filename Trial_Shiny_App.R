@@ -73,6 +73,8 @@ ui <- fluidPage(
                  textOutput("max_player_speed"),
                  textOutput("mean_speed"),
                  textOutput("route_efficiency"),
+                 textOutput("q_route_efficiency"),
+                 textOutput("c_route_efficiency"),
                  hr(),
                  selectInput("metric", "Select Metric:", 
                              choices = c("Standard Route Efficiency" = "route_efficiency", 
@@ -146,9 +148,18 @@ server <- function(input, output, session) {
   
   output$route_efficiency <- renderText({
     req(selected_data())
-    paste("Route Efficiency:", round(mean(selected_data()$route_efficiency, na.rm = TRUE), 2))
+    paste("Standard Route Efficiency:", round(mean(selected_data()$route_efficiency, na.rm = TRUE), 2))
   })
   
+  output$q_route_efficiency <- renderText({
+    req(selected_data())
+    paste("Quadratic Route Efficiency:", round(mean(selected_data()$q_route_efficiency, na.rm = TRUE), 2))
+  })
+  
+  output$c_route_efficiency <- renderText({
+    req(selected_data())
+    paste("Cubic Route Efficiency:", round(mean(selected_data()$c_route_efficiency, na.rm = TRUE), 2))
+  })
   output$scatterPlot <- renderPlotly({
     req(input$metric)
     
@@ -178,7 +189,7 @@ server <- function(input, output, session) {
       marker = list(
         size = 10,
         color = ~catch_prob, # Adding color gradient based on catch_prob
-        colorscale = "Viridis", # Color gradient
+        colorscale = "RdBu", # Color gradient
         colorbar = list(title = "Catch Probability")
       ),
       text = hover_text,
