@@ -1,4 +1,4 @@
-
+# You may need to set your working directory. 
 
 library(data.table)
 library(shiny)
@@ -40,7 +40,7 @@ conflicts_prefer(plotly::layout)
 ####################################################################################
 
 
-flyball_data <- fread("flyball_data.csv")
+flyball_data <- fread("./Clean/Team062-results.csv")
 
 
 plotflyballlocation <- function(flyball_data) {
