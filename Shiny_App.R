@@ -449,9 +449,9 @@ server <- function(input, output, session) {
   
   predict_points <- reactive({
     # First control point
-    p1_y <- pd$read_pickle("p1_y.pkl")
+    p1_y <- pd$read_pickle("./Clean/p1_y.pkl")
     # Second control point
-    p2_y <- pd$read_pickle("p2_y.pkl")
+    p2_y <- pd$read_pickle("./Clean/p2_y.pkl")
     
     field_x <- as.numeric(input$field_x)
     field_y <- as.numeric(input$field_y)
